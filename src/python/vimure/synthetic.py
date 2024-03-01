@@ -17,11 +17,17 @@ from abc import ABCMeta, abstractmethod
 from ._io import BaseNetwork
 from ._log import setup_logging
 from .utils import preprocess, sptensor_from_dense_array, transpose_ij
+from random import choices
 
 DEFAULT_N = 100
 DEFAULT_M = 100
 DEFAULT_L = 1
 DEFAULT_K = 2
+DEFAULT_INCOME = [51, 17, 35, 47, 51, 17, 31, 17, 63, 41, 47, 27, 17, 91, 33, 47, 15, 21, 13, 41, 63, 21, 29, 21, 31, 41, 35, 19, 35, 19, 33, 41, 100, 35, 17, 39, 25, 47, 35, 35, 27, 31, 27, 29, 81, 19
+, 19, 25, 19, 41, 27, 39, 21, 27, 45, 33, 29, 17, 49, 35, 49, 87, 29, 41, 25, 21, 27, 21, 19, 33, 45, 15, 15, 11, 25, 33, 3, 21, 27, 31, 9, 27, 29, 31, 29, 21, 53, 51, 19, 45, 29, 27,
+3, 33, 3, 19, 53, 49, 19, 31]
+
+DEFAULT_INCOME_MATRIX = [0,0]
 
 DEFAULT_C = 2
 DEFAULT_STRUCTURE = None
@@ -47,10 +53,12 @@ class BaseSyntheticNetwork(BaseNetwork, metaclass=ABCMeta):
         M: int = DEFAULT_M,
         L: int = DEFAULT_L,
         K: int = DEFAULT_K,
+        income: [int] = DEFAULT_INCOME,
+        income_Matrix: [int, int] = DEFAULT_INCOME_MATRIX,
         seed: int = 0,
         **kwargs,
     ):
-        super().__init__(N=N, M=M, L=L, K=K, seed=seed, **kwargs)
+        super().__init__(N=N, M=M, L=L, K=K, income=income, income_Matrix=income_Matrix, seed=seed, **kwargs)
 
     @abstractmethod
     def _generate_lv(self):
@@ -59,6 +67,8 @@ class BaseSyntheticNetwork(BaseNetwork, metaclass=ABCMeta):
     @abstractmethod
     def _build_Y(self):
         pass
+
+
 
     def _build_X(
         self,
@@ -155,6 +165,7 @@ class BaseSyntheticNetwork(BaseNetwork, metaclass=ABCMeta):
                 vals_k = np.argwhere(Y.vals == k).flatten()
                 lij = (Y_subs[0][vals_k], Y_subs[1][vals_k], Y_subs[2][vals_k])
                 lambda_k[lij] = k
+
 
         M_X = np.einsum("lm,lij->lijm", theta, lambda_k)
         MM = (M_X + mutuality * np.transpose(M_X, axes=(0, 2, 1, 3))) / (1.0 - mutuality * mutuality)
@@ -551,9 +562,15 @@ class StandardSBM(BaseSyntheticNetwork):
         """
         self.u, self.v, self.w = self._generate_lv()
 
+        # #To generate randomised list of the income of every member:
+        # incomeList = build_Income(M)
+        # print(incomeList)
+
         """
         Generate Y
         """
+        self.income_Matrix = build_Income_Matrix(DEFAULT_INCOME) #This doesn't work if I pass Self.income to it??? Ask Simon?
+        print('Income diff =',self.income_Matrix[50,55])
         M_Y = np.einsum("ik,jq->ijkq", self.u, self.v)
         M_Y = np.einsum("ijkq,akq->aij", M_Y, self.w)
         # sparsity parameter for Y
@@ -1252,3 +1269,19 @@ def build_custom_theta(
         else:
             theta[:, selected_reporters] = 50.0 * np.ones((gt_network.L, N_exa))
     return theta
+
+def build_Income(count):
+    input = pd.read_csv('income_input.csv')
+    index = input[input.columns[0]].values
+    chance = input[input.columns[1]].values
+
+    incomeList = choices(index, chance, k=count)
+    return(incomeList)
+
+def build_Income_Matrix(list):
+    length = len(list)
+    incomeMatrix = np.ndarray(shape=(length,length), dtype = int)
+    for x in range(length):
+        for y in range(length):
+            incomeMatrix[x,y] = abs(list[x] - list[y])
+    return incomeMatrix

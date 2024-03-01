@@ -15,7 +15,7 @@ import time
 import numpy as np
 import scipy as sp
 import pandas as pd
-import vimure as vm
+from src.python import vimure as vm
 
 from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.metrics import make_scorer, f1_score, mean_squared_error
@@ -76,7 +76,7 @@ class UnreliableReportersExp(RegressorMixin, BaseEstimator):
         self.max_iter = max_iter
         self.verbose = verbose
 
-        self.logger = vm.log.setup_logging("experiment.UnreliableReportersExp", verbose)
+        self.logger = vm._log.setup_logging("experiment.UnreliableReportersExp", verbose)
 
     def fit(self, X, y):
         """
@@ -119,7 +119,7 @@ class UnreliableReportersExp(RegressorMixin, BaseEstimator):
         self.logger.info(msg)
         LAMBDA_0 = 0.01
         LAMBDA_DIFF = 0.99
-        self.gt_network.build_X(
+        self.gt_network._build_X(
             mutuality=self.eta,
             theta=theta,  # Pre-defined theta
             cutoff_X=False,
@@ -239,7 +239,7 @@ def main(
 
     """
 
-    module_logger = vm.log.setup_logging("experiments.unreliable", verbose)
+    module_logger = vm._log.setup_logging("experiments.unreliable", verbose)
 
     if "N" in kwargs:
         N = kwargs["N"]
@@ -292,20 +292,20 @@ def main(
 
     time_start = time.time()
 
-    # Multitensor won't always produce a single giant component, selecting one seed that is guaranteed to produce one.
-    gt_network = vm.synthetic.Multitensor(
+    # StandardSBM won't always produce a single giant component, selecting one seed that is guaranteed to produce one.
+    gt_network = vm.synthetic.StandardSBM(
         N=N,
         M=M,
         L=L,
         C=C,
         K=K,
-        eta=reciprocity_Y,
-        ExpM=None,
+        #eta=reciprocity_Y,
+        #ExpM=None,
         avg_degree=avg_degree,
         sparsify=True,
         seed=gt_network_seed,
     )
-    msg = f"Multitensor took {np.round(time.time() - time_start, 2)} seconds to run'"
+    msg = f"StandardSBM took {np.round(time.time() - time_start, 2)} seconds to run'"
     module_logger.info(msg)
 
     """
@@ -390,7 +390,7 @@ def main(
 
     if save_output:
         print(results_df)
-        filename = "/mnt/data/exp_unreliable_reporters.csv"
+        filename = "exp_unreliable_reportersBIAS.csv"
         module_logger.info("Saving results to %s" % filename)
         results_df.to_csv(filename, index=False)
 
