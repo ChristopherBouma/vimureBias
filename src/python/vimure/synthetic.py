@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import networkx as nx
 import sktensor as skt
+import scipy as sp
 
 from abc import ABCMeta, abstractmethod
 from ._io import BaseNetwork
@@ -23,10 +24,8 @@ DEFAULT_N = 100
 DEFAULT_M = 100
 DEFAULT_L = 1
 DEFAULT_K = 2
-DEFAULT_INCOME = [51, 17, 35, 47, 51, 17, 31, 17, 63, 41, 47, 27, 17, 91, 33, 47, 15, 21, 13, 41, 63, 21, 29, 21, 31, 41, 35, 19, 35, 19, 33, 41, 100, 35, 17, 39, 25, 47, 35, 35, 27, 31, 27, 29, 81, 19
-, 19, 25, 19, 41, 27, 39, 21, 27, 45, 33, 29, 17, 49, 35, 49, 87, 29, 41, 25, 21, 27, 21, 19, 33, 45, 15, 15, 11, 25, 33, 3, 21, 27, 31, 9, 27, 29, 31, 29, 21, 53, 51, 19, 45, 29, 27,
-3, 33, 3, 19, 53, 49, 19, 31]
 
+DEFAULT_INCOME = [0]
 DEFAULT_INCOME_MATRIX = [0,0]
 
 DEFAULT_C = 2
@@ -147,9 +146,19 @@ class BaseSyntheticNetwork(BaseNetwork, metaclass=ABCMeta):
             # Generate theta (reliability)
             theta = prng.gamma(shape=sh_theta, scale=sc_theta, size=(L, M))
 
+        #TODO: CHRIS - make it so you can input
+        sh_tau = sh_theta
+        sc_tau = sc_theta
+        tau = prng.gamma(shape = sh_tau, scale = sc_tau, size = (L, M))
+
+        # string = "-------------------------------- \n"
         LAMBDA_0 = 0.01
         # Generate theta (ties average interactions)
         lambda_k = np.ones(shape=Y.shape).astype("float") * LAMBDA_0
+        #print('Y Shape is:', Y.shape)
+        #pd.set_option('display.max_rows', len(Y))
+        #print(str(Y[0,1,6]))
+        #pd.reset_option('display.max_rows')
 
         if lambda_diff is not None:
             if lambda_diff <= 0:
@@ -158,7 +167,9 @@ class BaseSyntheticNetwork(BaseNetwork, metaclass=ABCMeta):
 
             for k in range(1, K):
                 vals_k = np.argwhere(Y.vals == k).flatten()
+                #print(vals_k)
                 lij = (Y_subs[0][vals_k], Y_subs[1][vals_k], Y_subs[2][vals_k])
+                #print("lij is:", lij)
                 lambda_k[lij] = LAMBDA_0 + lambda_diff
         else:
             for k in range(1, K):
@@ -166,9 +177,31 @@ class BaseSyntheticNetwork(BaseNetwork, metaclass=ABCMeta):
                 lij = (Y_subs[0][vals_k], Y_subs[1][vals_k], Y_subs[2][vals_k])
                 lambda_k[lij] = k
 
-
+        #print("lambda_k[lij]", lambda_k[lij])
+        #print("lambda_k of 1 2", lambda_k[0,0,1])
         M_X = np.einsum("lm,lij->lijm", theta, lambda_k)
+
+        tauXIncMatrix = np.einsum("lm, lij -> lijm", tau, self.income_Matrix)
+        tauXIncMatrix = tauXIncMatrix * 0.01
+        biasEnabled = True
+        if biasEnabled:
+             M_X = M_X + tauXIncMatrix
+             M_X[M_X < 0.001] = 0.001 #TODO: CHRIS
+
+        test = False
+        if(test):
+            print("theta: ", str(theta))
+            print("reliability of 5:", str(theta[0, 4]))
+            print("income of person 1:", str(self.income[0]))
+            print("income of person 2:", str(self.income[1]))
+            print("difference of person 1 and 2:", str(self.income_Matrix[0,0,1]))
+            print("tau of person 5:", str(tau[0,4]))
+            print("M_X of reporter 5 about person 1:", str(M_X[0,0,:,4]))
+            print("Bias of reporter 5, about person 1 2:", str(tauXIncMatrix[0, 0, 1, 4]))
+            print("Reliability + Bias of reporter 5 about person 1 2:", str(M_X[0, 0, 1,4]))
+
         MM = (M_X + mutuality * np.transpose(M_X, axes=(0, 2, 1, 3))) / (1.0 - mutuality * mutuality)
+
 
         X = np.zeros_like(MM).astype("int")
 
@@ -177,6 +210,7 @@ class BaseSyntheticNetwork(BaseNetwork, metaclass=ABCMeta):
 
         if flag_self_reporter:
             R = build_self_reporter_mask(self)
+            #print(R[0,4,:, 4])
 
             for l in range(L):
                 for m in range(M):
@@ -189,6 +223,7 @@ class BaseSyntheticNetwork(BaseNetwork, metaclass=ABCMeta):
                         # for those reporters that report perfectly, i.e. theta=1, do not extract from a poisson.
                         # Rather, assign the X deterministically using the mean of the poisson
                         if np.allclose(theta[l, m], 1.0) == False:
+                            #print("M_X in the loop: ", M_X[l, j, i, m])
                             if r < 0.5:
                                 X[l, i, j, m] = prng.poisson(MM[l, i, j, m] * R[l, i, j, m])
                                 if cutoff_X:
@@ -563,14 +598,13 @@ class StandardSBM(BaseSyntheticNetwork):
         self.u, self.v, self.w = self._generate_lv()
 
         # #To generate randomised list of the income of every member:
-        # incomeList = build_Income(M)
-        # print(incomeList)
+        self.income = build_Income(self, self.M)
 
         """
         Generate Y
         """
-        self.income_Matrix = build_Income_Matrix(DEFAULT_INCOME) #This doesn't work if I pass Self.income to it??? Ask Simon?
-        print('Income diff =',self.income_Matrix[50,55])
+        self.income_Matrix = build_Income_Matrix(self, self.income)
+        #print('Income diff =',self.income_Matrix[50,55])
         M_Y = np.einsum("ik,jq->ijkq", self.u, self.v)
         M_Y = np.einsum("ijkq,akq->aij", M_Y, self.w)
         # sparsity parameter for Y
@@ -584,8 +618,8 @@ class StandardSBM(BaseSyntheticNetwork):
         for l in range(self.L):
             np.fill_diagonal(Y[l], 0)
         Y[Y > self.K - 1] = self.K - 1  # cut-off, max entry has to be equal to K - 1
-
         self.Y = preprocess(Y)
+
 
     def __sample_membership_vectors(self):
         """
@@ -1270,18 +1304,29 @@ def build_custom_theta(
             theta[:, selected_reporters] = 50.0 * np.ones((gt_network.L, N_exa))
     return theta
 
-def build_Income(count):
+def build_Income(self, count):
     input = pd.read_csv('income_input.csv')
     index = input[input.columns[0]].values
     chance = input[input.columns[1]].values
-
-    incomeList = choices(index, chance, k=count)
+    np.random.seed(seed = self.seed)
+    counter = 0
+    list = []
+    for x in index:
+        for y in range(chance[counter]):
+            list.append(x)
+        counter += 1
+    shape, loc, scale = sp.stats.lognorm.fit(list, floc=0)
+    #incomeList = choices(index, chance, k=count)
+    incomeList = sp.stats.lognorm.rvs(s = shape, loc = 0, scale = scale, size = count)
     return(incomeList)
 
-def build_Income_Matrix(list):
+def build_Income_Matrix(self, list):
     length = len(list)
-    incomeMatrix = np.ndarray(shape=(length,length), dtype = int)
+    incomeMatrix = np.ndarray(shape=(1, length,length), dtype = float)
     for x in range(length):
         for y in range(length):
-            incomeMatrix[x,y] = abs(list[x] - list[y])
+            incomeMatrix[0, x, y] = abs((np.log10(list[x])) - np.log10((list[y])))
+            #incomeMatrix[0,x,y] = abs((math.log(list[x])) - math.log((list[y])))
+            #incomeMatrix[0,x,y] = abs(list[x] - list[y])
+    incomeMatrix = 1/(incomeMatrix + 0.1)
     return incomeMatrix

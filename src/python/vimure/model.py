@@ -1,4 +1,5 @@
 """Inference model"""
+import math
 import sys
 import time
 import warnings
@@ -82,6 +83,7 @@ class VimureModel(TransformerMixin, BaseEstimator):
         lambda_prior=(10.0, 10.0),
         theta_prior=(0.1, 0.1),
         eta_prior=(0.5, 1.0),
+        tau_prior = (0.1, 0.1),
         rho_prior=None,
         seed: int = None,
         **extra_params,
@@ -265,6 +267,11 @@ class VimureModel(TransformerMixin, BaseEstimator):
             self.alpha_theta = theta_prior[0]
             self.beta_theta = theta_prior[1]
 
+
+        #Todo: CHRIS - Change how we set this tau priors:
+        self.alpha_tau = tau_prior[0]
+        self.beta_tau = tau_prior[1]
+
         """
         HANDLE lambda priors
         """
@@ -327,7 +334,9 @@ class VimureModel(TransformerMixin, BaseEstimator):
     def fit(
         self,
         X,
+        income_Matrix,
         theta_prior=(0.1, 0.1),
+        tau_prior=(0.1, 0.1),
         lambda_prior=(10.0, 10.0),
         eta_prior=(0.5, 1.0),
         rho_prior=None,
@@ -373,10 +382,10 @@ class VimureModel(TransformerMixin, BaseEstimator):
             lambda_prior=lambda_prior,
             rho_prior=rho_prior,
             eta_prior=eta_prior,
+            tau_prior=tau_prior,
             seed=seed,
             **extra_params,
         )
-
         """
         Inference
         """
@@ -396,6 +405,7 @@ class VimureModel(TransformerMixin, BaseEstimator):
             self._initialize_priors()
             self._initialize_old_variables()
 
+            self.income_Matrix = income_Matrix
             coincide = 0
             iter = 1
             reached_convergence = False
@@ -560,10 +570,10 @@ class VimureModel(TransformerMixin, BaseEstimator):
 
     def _initialize_priors(self):
         """
-        Random initialization of the parameters theta, lambda, eta, rho.
+        Random initialization of the parameters theta, lambda, eta, rho and tau.
         """
 
-        self.logger.verbose("Setting priors for gamma_shp, phi_shp, gamma_rte, phi_rte")
+        self.logger.verbose("Setting priors for gamma_shp, phi_shp, gamma_rte, phi_rte, tau_shp and tau_rte")
         # TODO: Could these variables be made sparse?
 
         # we include some randomness
@@ -575,6 +585,10 @@ class VimureModel(TransformerMixin, BaseEstimator):
             self.alpha_lambda * self.prng.random_sample(size=(self.L, self.K))
             + self.alpha_lambda
         )
+        self.tau_shp = (
+            self.alpha_tau * self.prng.random_sample(size=(self.L, self.M))
+            + self.alpha_tau
+        )
         self.gamma_rte = (
             self.beta_theta * self.prng.random_sample(size=(self.L, self.M))
             + self.beta_theta
@@ -582,6 +596,10 @@ class VimureModel(TransformerMixin, BaseEstimator):
         self.phi_rte = (
             self.beta_lambda * self.prng.random_sample(size=(self.L, self.K))
             + self.beta_lambda
+        )
+        self.tau_rte = (
+                self.beta_tau * self.prng.random_sample(size=(self.L, self.M))
+                + self.beta_tau
         )
 
         self.logger.verbose("Setting priors for nu_shp, nu_rte")
@@ -647,6 +665,10 @@ class VimureModel(TransformerMixin, BaseEstimator):
         self._update_cache(data, subs_nz, data_T_vals)
         delta_phi = self._update_phi(subs_nz)
 
+        self.logger.verbose("Updating tau")
+        self._update_cache(data, subs_nz, data_T_vals)
+        #delta_tau = self._update_tau(subs_nz)
+
         self.logger.verbose("Updating rho")
         self._update_cache(data, subs_nz, data_T_vals)
         delta_rho = self._update_rho(subs_nz)
@@ -656,6 +678,7 @@ class VimureModel(TransformerMixin, BaseEstimator):
             delta_nu = self._update_nu(subs_nz)
         else:
             delta_nu = 0.0
+        #print("delta _nu", delta_nu)
 
         return (delta_gamma, delta_phi, delta_rho, delta_nu)
 
@@ -672,28 +695,100 @@ class VimureModel(TransformerMixin, BaseEstimator):
         data_T_vals : ndarray/None
             Array with values of entries A[j, i] given non-zero entry (i, j) - if mutuality=True.
         """
-
+        print("--------------------------------")
+        # print("1", self.gamma_shp)
+        # print("2", self.gamma_rte)
+        # print("3", self.tau_shp)
+        # print("4", self.tau_rte)
+        #print(self.income_Matrix)
         self.G_exp_theta = np.exp(sp.psi(self.gamma_shp) - np.log(self.gamma_rte))
+
         self.G_exp_lambda = np.exp(sp.psi(self.phi_shp) - np.log(self.phi_rte))
 
+        self.G_exp_tau = np.exp(sp.psi(self.tau_shp) - np.log(self.tau_rte))
+        # debug = False
+        #print(self.G_exp_tau.shape)
+        #print(self.G_exp_theta.shape)
+        #print("G_exp_theta:",self.G_exp_theta)
+        #print(self.G_exp_lambda[0].shape)
+        #print(self.G_exp_lambda)
+        #print(data[0, 0, 23,23])
+        #print("shape of data", data.shape)
+        #print(subs_nz)
+        #print("subs_nz[0]",subs_nz[0])
+        #print("income 0-23",self.income_Matrix[0,0,23])
+        #print("income nonz reporter: ", self.income_Matrix[0,subs_nz[1],subs_nz[2]])
+        # print("subs1", subs_nz[1])
+        # print("subs2", subs_nz[2])
+        #print("subs_nz[3]", subs_nz[3])
+        #print("tau of 0: ", self.G_exp_tau[0,0])
+        #print("tau of 23: ", self.G_exp_tau[0,23])
+        # print(self.G_exp_tau[subs_nz[0], subs_nz[3]])
+        # tauxInc = (self.G_exp_tau[subs_nz[0], subs_nz[3]] * incomeMatrix[0, subs_nz[1], subs_nz[2]])
+        # print(tauxInc.shape)
+        #einsumtau = np.einsum("I,Ik->Ik", self.G_exp_tau[subs_nz[0], subs_nz[3]], incomeMatrix[0, subs_nz[1], subs_nz[2]])
+        #print(einsumtau)
+        #print("G_exp_theta[subs[0],subs[3]",self.G_exp_theta[subs_nz[0], subs_nz[3]])
+        #print(self.G_exp_lambda[subs_nz[0], :])
+        #self.G_exp_nu = np.exp(sp.psi(self.nu_shp) - np.log(self.nu_rte))
+        #print(self.nu_shp)
+        #print(self.nu_rte)
+        #print(self.beta_mutuality)
+        #print("data", data)
+        #print("data_T_Vals", data_T_vals)
+        #print("z2", self.G_exp_nu.shape)
+        #print("data T shape", data_T_vals.shape)
+        #print(data.shape)
         if not self.mutuality:
-            self.data_z1_nz = data.vals[:, np.newaxis].astype(float)
-            self.data_z2_nz = None
-        else:
-
-            self.G_exp_nu = np.exp(sp.psi(self.nu_shp) - np.log(self.nu_rte))
+            print("No mutuality")
             self.z1_nz = np.einsum(
                 "I,Ik->Ik",
                 self.G_exp_theta[subs_nz[0], subs_nz[3]],
                 self.G_exp_lambda[subs_nz[0], :],
             )  # has dim= (I,K)
+            #print(self.z1_nz)
+            self.z3_nz = (self.G_exp_tau[subs_nz[0], subs_nz[3]] * self.income_Matrix[0, subs_nz[1], subs_nz[2]])
+            #print(self.z3_nz)
+            self.z_den_nz = self.z1_nz + self.z3_nz[:, np.newaxis]  # has dim= (I,K)
+            # print("z1", self.z1_nz)
+            # print("z3", self.z3_nz)
+            #print(self.z_den_nz.shape)
+            #print(data.vals.shape)
+            #print(self.z3_nz.shape)
+            #print(data.vals)
+            #print(self.z3_nz)
+            #print(self.z_den_nz)
+            self.z_den_nz[self.z_den_nz == 0] = 1
+            self.data_z1_nz = data.vals[:, np.newaxis] * self.z1_nz / self.z_den_nz
+            #print(self.data_z1_nz)
+            self.data_z3_nz = data.vals[:, np.newaxis] * self.z3_nz[:, np.newaxis] / self.z_den_nz
+            # if debug:
+            #     print(self.data_z3_nz)
+            #     print((self.data_z1_nz + self.data_z3_nz)[0, :])
+            #     self.data_z1_nz = data.vals[:, np.newaxis].astype(float)
+            #     self.data_z2_nz = None
+        else:
+            print("with mutuality")
+            self.G_exp_nu = np.exp(sp.psi(self.nu_shp) - np.log(self.nu_rte))
+            self.z1_nz = np.einsum(
+                "I,Ik->Ik",
+                self.G_exp_theta[subs_nz[0], subs_nz[3]],
+                self.G_exp_lambda[subs_nz[0], :],
+            )  # has dim= (I,K) 
             self.z2_nz = self.G_exp_nu * data_T_vals  # has dim= (I)
-            self.z_den_nz = self.z1_nz + self.z2_nz[:, np.newaxis]  # has dim= (I,K)
+            self.z3_nz = (self.G_exp_tau[subs_nz[0], subs_nz[3]] * self.income_Matrix[0, subs_nz[1], subs_nz[2]])
+            self.z_den_nz = self.z1_nz + self.z2_nz[:, np.newaxis] + self.z3_nz[:, np.newaxis]  # has dim= (I,K)
             self.z_den_nz[self.z_den_nz == 0] = 1
             self.data_z1_nz = data.vals[:, np.newaxis] * self.z1_nz / self.z_den_nz
             self.data_z2_nz = (
                 data.vals[:, np.newaxis] * self.z2_nz[:, np.newaxis] / self.z_den_nz
             )
+            self.data_z3_nz = data.vals[:, np.newaxis] * self.z3_nz[:, np.newaxis] / self.z_den_nz
+            # if debug:
+            #     print("z1",self.data_z1_nz)
+            #     print("z2",self.data_z2_nz)
+            #     print("z3",self.data_z3_nz)
+            #     print(self.data_z1_nz + self.data_z2_nz + self.data_z3_nz)
 
     def _update_gamma(self, subs_nz):
 
@@ -759,6 +854,10 @@ class VimureModel(TransformerMixin, BaseEstimator):
         self.phi_rte_old = np.copy(self.phi_rte)
 
         return dist_phi
+
+    def _update_tau(self, subs_nz):
+
+        self.tau_shp = ...
 
     def _update_rho(self, subs_nz):
 

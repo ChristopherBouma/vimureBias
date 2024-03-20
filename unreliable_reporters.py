@@ -22,22 +22,22 @@ from sklearn.metrics import make_scorer, f1_score, mean_squared_error
 from sklearn.model_selection import GridSearchCV
 
 
-DEFAULT_THETA_RATIO_VALS = [
-    0.01,
-    0.02,
-    0.03,
-    0.05,
-    0.08,
-    0.10,
-    0.15,
-    0.20,
-    0.30,
-    0.40,
-    0.50,
-]
+DEFAULT_THETA_RATIO_VALS = [ 0.5]
+#     0.01,
+#     0.02,
+#     0.03,
+#     0.05,
+#     0.08,
+#     0.10,
+#     0.15,
+#     0.20,
+#     0.30,
+#     0.40,
+#     0.50,
+# ]
 
 # Guarantees we have 10 realisations for every experiment
-DEFAULT_PSEUDO_RANDOM_SEEDS = np.arange(10)
+DEFAULT_PSEUDO_RANDOM_SEEDS = np.arange(1)
 
 DEFAULT_ETA = 0.0  # Without mutuality
 
@@ -121,7 +121,7 @@ class UnreliableReportersExp(RegressorMixin, BaseEstimator):
         LAMBDA_DIFF = 0.99
         self.gt_network._build_X(
             mutuality=self.eta,
-            theta=theta,  # Pre-defined theta
+            theta=None,  # Pre-defined theta
             cutoff_X=False,
             lambda_diff=LAMBDA_DIFF,
             flag_self_reporter=True,
@@ -131,6 +131,7 @@ class UnreliableReportersExp(RegressorMixin, BaseEstimator):
 
         self.X = self.gt_network.X
         self.R = self.gt_network.R
+        self.income_Matrix = self.gt_network.income_Matrix
         self.theta = self.gt_network.theta
         self.lambda_k = self.gt_network.lambda_k
 
@@ -165,15 +166,18 @@ class UnreliableReportersExp(RegressorMixin, BaseEstimator):
         beta_lambda = 10000 * np.ones((lambda_k_GT.shape))
         alpha_lambda = lambda_k_GT * beta_lambda
         theta_prior = (0.1, 0.1)
+        tau_prior = (0.1, 0.1)
 
         time_start = time.time()
         model = vm.model.VimureModel(mutuality=self.mutuality, verbose=self.verbose)
         model.fit(
             self.X,
+            self.income_Matrix,
             K=self.K,
             seed=self.seed,  # initial seed
             theta_prior=theta_prior,
             eta_prior=(0.5, 1),
+            tau_prior=tau_prior,
             alpha_lambda=alpha_lambda,
             beta_lambda=beta_lambda,
             num_realisations=self.num_realisations,
@@ -319,21 +323,23 @@ def main(
         gt_network, num_realisations=num_realisations, max_iter=max_iter, verbose=verbose, eta=eta,
     )
 
-    parameters = {
-        "seed": available_seeds,
-        "theta_ratio": theta_ratio_vals,
-        "exaggeration_type": exaggeration_type,
-        "mutuality": mutuality,
-    }
+    # parameters = {
+    #     "seed": available_seeds,
+    #     "theta_ratio": theta_ratio_vals,
+    #     "exaggeration_type": exaggeration_type,
+    #     "mutuality": mutuality,
+    # }
 
     # Uncomment this section for a shorter DEBUG run
-    #     parameters = {
-    #         "seed": [0],
-    #         "theta_ratio": [0, 0.2],
-    #         "exaggeration_type": ["under", "over"],
-    #         "mutuality": [True, False],
-    #     }
-    # n_jobs = 1
+    parameters = {
+            "seed": [0],
+            #"theta_ratio": [0, 0.2],
+            "theta_ratio": theta_ratio_vals,
+            "exaggeration_type": ["under", "over"],
+            "mutuality": [True, False],
+            #"mutuality": mutuality,
+        }
+    n_jobs = 1
 
     """
     GRID SEARCH

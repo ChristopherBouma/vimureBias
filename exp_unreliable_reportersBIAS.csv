@@ -1,0 +1,5 @@
+param_exaggeration_type,param_mutuality,param_seed,param_theta_ratio,mean_test_f1,mean_test_mse,std_test_f1,std_test_mse,mean_fit_time,eta
+under,True,0,0.5,0.9065606361829024,-0.0094,0.0,0.0,6.3363916873931885,0.0
+under,False,0,0.5,0.9065606361829024,-0.0094,0.0,0.0,6.142378330230713,0.0
+over,True,0,0.5,1.0,0.0,0.0,0.0,12.65154480934143,0.0
+over,False,0,0.5,1.0,0.0,0.0,0.0,8.881026983261108,0.0
